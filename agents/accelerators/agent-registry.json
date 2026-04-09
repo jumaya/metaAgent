@@ -1,0 +1,483 @@
+{
+  "_metadata": {
+    "version": "2.0",
+    "description": "Central registry of all agents in the migration ecosystem. Maintained by @migration-orchestrator.",
+    "last_updated": "",
+    "protocol_version": "1.0"
+  },
+  "_instructions": "This file is the source of truth for @migration-orchestrator. It defines which agents exist, at which pipeline phase they act, what they produce, and how many retries are allowed before escalating to the developer.",
+
+  "agent_protocol": {
+    "_description": "Communication contract between agents. All pipeline agents must comply with it.",
+    "version": "1.0",
+    "execution_block": {
+      "location_json": "Field '_execution' at the start of the output JSON (before any other field)",
+      "location_md": "HTML comment '<!-- _execution: {...} -->' on the first line of the .md file",
+      "schema": {
+        "agent": "string — name of the agent that generated the output",
+        "form": "string — name of the form being processed",
+        "status": "SUCCESS | PARTIAL | FAILED",
+        "timestamp": "string — ISO-8601",
+        "warnings_count": "number — total warnings in the output",
+        "degradation_notes": "string — description of what failed or is incomplete (empty if SUCCESS)",
+        "context_forward": {
+          "for_agent": "string — name of the next pipeline agent that must read these alerts",
+          "alerts": "string[] — context messages the next agent needs to know"
+        }
+      }
+    },
+    "status_semantics": {
+      "SUCCESS": "Complete and usable output. The next agent can continue without restrictions.",
+      "PARTIAL": "Usable output but with degradation. The orchestrator warns the dev and continues the pipeline.",
+      "FAILED": "Unusable output. The orchestrator activates the retry/block mechanism."
+    },
+    "context_forward_chain": [
+      "vb6-analyzer → sp-migration-planner",
+      "sp-migration-planner → sql-analyzer",
+      "sql-analyzer → reuse-tracker (+ propaga alertas heredadas de vb6-analyzer)",
+      "reuse-tracker → backend-generator",
+      "backend-generator → traceability-documenter",
+      "traceability-documenter → security-reviewer",
+      "security-reviewer → test-generator"
+    ]
+  },
+
+  "pipeline_phases": {
+    "SETUP": {
+      "description": "Inicialización única del proyecto — ejecutar UNA SOLA VEZ antes de cualquier migración",
+      "agents": ["migration-orchestrator-setup", "docker-agent", "cicd-agent"],
+      "parallel": false,
+      "one_time_only": true,
+      "produces_files": [
+        "pom.xml",
+        "src/main/java/com/fcv/FcvApplication.java",
+        "src/main/resources/application.yml",
+        "src/main/resources/application-dev.yml",
+        "jenkins/Dockerfile.backend",
+        "jenkins/backend/Jenkinsfile.ci",
+        "jenkins/backend/Jenkinsfile.cd",
+        "docker-compose.staging.yml",
+        "docker-compose.prod.yml",
+        ".mvn/wrapper/maven-wrapper.properties",
+        "mvnw"
+      ],
+      "note": "Estos archivos NO deben generarse manualmente ni por @backend-generator. Son responsabilidad exclusiva de la fase SETUP."
+    },
+    "ANALIZANDO": {
+      "description": "Análisis del formulario VB6, SPs y mapeo SQL",
+      "agents": ["vb6-analyzer", "sp-migration-planner", "sql-analyzer", "domain-mapper"],
+      "parallel": false,
+      "produces_status": "ANALIZANDO"
+    },
+    "BACKEND_LISTO": {
+      "description": "Generación de código backend Java com.fcv",
+      "agents": ["reuse-tracker", "backend-generator", "traceability-documenter"],
+      "parallel": false,
+      "produces_status": "BACKEND_LISTO"
+    },
+    "FRONTEND_LISTO": {
+      "description": "FUERA DE ALCANCE en esta fase — solo backend FCV",
+      "agents": [],
+      "parallel": false,
+      "produces_status": "FRONTEND_LISTO",
+      "out_of_scope": true,
+      "note": "Next.js frontend es una fase posterior. No invocar estos agentes."
+    },
+    "REVISADO": {
+      "description": "Revisión de calidad y seguridad (Ley 1581/2012 + Res. 866/2021)",
+      "agents": ["security-reviewer", "test-generator"],
+      "parallel": true,
+      "produces_status": "REVISADO"
+    }
+  },
+
+  "agents": {
+    "vb6-analyzer": {
+      "instructions_file": ".github/instructions/vb6-analyzer.instructions.md",
+      "skills": [
+        ".github/skills/backend/ddd-patterns.skill.md"
+      ],
+      "phase": "ANALIZANDO",
+      "step_in_phase": 1,
+      "protocol": {
+        "output_format": "JSON",
+        "execution_block_location": "first_field",
+        "context_forward_to": "sp-migration-planner"
+      },
+      "input": {
+        "required": ["legacy/forms/{form}.frm"],
+        "optional": []
+      },
+      "output": {
+        "files": ["migration-registry/forms/{form}-analysis.json"],
+        "updates": []
+      },
+      "step_limit": {
+        "max_retries": 2,
+        "on_exceed": "BLOCK_AND_NOTIFY",
+        "reason": "Si falla 2 veces el .frm puede estar corrupto o ilegible"
+      }
+    },
+
+    "sp-migration-planner": {
+      "instructions_file": ".github/instructions/sp-migration-planner.instructions.md",
+      "skills": [
+        ".github/skills/data/sql-to-jpql.skill.md",
+        ".github/skills/backend/jpa-patterns.skill.md"
+      ],
+      "phase": "ANALIZANDO",
+      "step_in_phase": 2,
+      "protocol": {
+        "output_format": "JSON",
+        "execution_block_location": "first_field",
+        "context_forward_to": "sql-analyzer",
+        "inherits_context_from": "vb6-analyzer"
+      },
+      "input": {
+        "required": ["migration-registry/forms/{form}-analysis.json"],
+        "optional": ["migration-registry/master-index.json"]
+      },
+      "output": {
+        "files": ["migration-registry/forms/{form}-sp-classification.json"],
+        "updates": ["migration-registry/master-index.json"]
+      },
+      "step_limit": {
+        "max_retries": 1,
+        "on_exceed": "BLOCK_AND_NOTIFY",
+        "reason": "Superar cap 20% categoría B requiere decisión del Tech Lead"
+      }
+    },
+
+    "sql-analyzer": {
+      "instructions_file": ".github/instructions/sql-analyzer.instructions.md",
+      "skills": [
+        ".github/skills/data/sql-to-jpql.skill.md",
+        ".github/skills/backend/jpa-patterns.skill.md"
+      ],
+      "phase": "ANALIZANDO",
+      "step_in_phase": 3,
+      "protocol": {
+        "output_format": "JSON",
+        "execution_block_location": "first_field",
+        "context_forward_to": "reuse-tracker",
+        "inherits_context_from": "sp-migration-planner"
+      },
+      "input": {
+        "required": ["migration-registry/forms/{form}-analysis.json"],
+        "optional": []
+      },
+      "output": {
+        "files": ["migration-registry/forms/{form}-sql-mapping.json"],
+        "updates": []
+      },
+      "step_limit": {
+        "max_retries": 2,
+        "on_exceed": "BLOCK_AND_NOTIFY",
+        "reason": "Complex SQL may require manual developer intervention"
+      }
+    },
+
+    "domain-mapper": {
+      "instructions_file": ".github/instructions/domain-mapper.instructions.md",
+      "skills": [
+        ".github/skills/backend/ddd-patterns.skill.md",
+        ".github/skills/architecture/adr-patterns.skill.md",
+        ".github/skills/architecture/modular-monolith-patterns.skill.md"
+      ],
+      "phase": "ANALIZANDO",
+      "step_in_phase": 4,
+      "protocol": {
+        "output_format": "MD",
+        "execution_block_location": "none",
+        "context_forward_to": null
+      },
+      "input": {
+        "required": [
+          "migration-registry/forms/{form}-analysis.json",
+          "migration-registry/forms/{form}-sql-mapping.json"
+        ],
+        "optional": ["migration-registry/domains/{domain}.md"]
+      },
+      "output": {
+        "files": [],
+        "updates": ["migration-registry/domains/{domain}.md"]
+      },
+      "step_limit": {
+        "max_retries": 2,
+        "on_exceed": "BLOCK_AND_NOTIFY",
+        "reason": "Domain ambiguity requires a developer decision"
+      }
+    },
+
+    "reuse-tracker": {
+      "instructions_file": ".github/instructions/reuse-tracker.instructions.md",
+      "skills": [],
+      "phase": "BACKEND_LISTO",
+      "step_in_phase": 1,
+      "protocol": {
+        "output_format": "JSON",
+        "execution_block_location": "first_field",
+        "context_forward_to": "backend-generator",
+        "inherits_context_from": "sql-analyzer"
+      },
+      "input": {
+        "required": [
+          "migration-registry/forms/{form}-sql-mapping.json",
+          ".github/agents/accelerators/services-catalog.json"
+        ],
+        "optional": []
+      },
+      "output": {
+        "files": ["migration-registry/forms/{form}-reuse-plan.json"],
+        "updates": []
+      },
+      "step_limit": {
+        "max_retries": 1,
+        "on_exceed": "BLOCK_AND_NOTIFY",
+        "reason": "Reuse conflict requires a developer decision"
+      }
+    },
+
+    "backend-generator": {
+      "instructions_file": ".github/instructions/backend-generator.instructions.md",
+      "skills": [
+        ".github/skills/backend/ddd-patterns.skill.md",
+        ".github/skills/backend/cqrs-patterns.skill.md",
+        ".github/skills/backend/jpa-patterns.skill.md",
+        ".github/skills/backend/exception-handling.skill.md",
+        ".github/skills/architecture/modular-monolith-patterns.skill.md"
+      ],
+      "phase": "BACKEND_LISTO",
+      "step_in_phase": 2,
+      "protocol": {
+        "output_format": "CODE",
+        "execution_block_location": "none",
+        "context_forward_to": null,
+        "inherits_context_from": "reuse-tracker"
+      },
+      "input": {
+        "required": [
+          "migration-registry/forms/{form}-reuse-plan.json",
+          "migration-registry/domains/{domain}.md"
+        ],
+        "optional": [".github/agents/accelerators/services-catalog.json"]
+      },
+      "output": {
+        "files": ["src/main/java/..."],
+        "updates": [".github/agents/accelerators/services-catalog.json"]
+      },
+      "step_limit": {
+        "max_retries": 2,
+        "on_exceed": "BLOCK_AND_NOTIFY",
+        "reason": "Complex business logic may require manual review"
+      }
+    },
+
+    "traceability-documenter": {
+      "instructions_file": ".github/instructions/traceability-documenter.instructions.md",
+      "skills": [],
+      "phase": "BACKEND_LISTO",
+      "step_in_phase": 3,
+      "protocol": {
+        "output_format": "MD",
+        "execution_block_location": "html_comment_first_line",
+        "context_forward_to": "security-reviewer"
+      },
+      "input": {
+        "required": [
+          "migration-registry/forms/{form}-analysis.json",
+          "migration-registry/forms/{form}-reuse-plan.json"
+        ],
+        "optional": []
+      },
+      "output": {
+        "files": ["migration-registry/forms/{form}.md"],
+        "updates": [".github/agents/accelerators/master-index.json"]
+      },
+      "step_limit": {
+        "max_retries": 1,
+        "on_exceed": "SKIP_AND_WARN",
+        "reason": "La trazabilidad es importante pero no bloquea el pipeline"
+      }
+    },
+
+    "component-library-agent": {
+      "instructions_file": ".github/instructions/component-library-agent.instructions.md",
+      "skills": [
+        ".github/skills/frontend/nextjs-patterns.skill.md"
+      ],
+      "phase": "FRONTEND_LISTO",
+      "out_of_scope": true,
+      "note": "FUERA DE ALCANCE — frontend es una fase posterior al backend FCV",
+      "protocol": {
+        "output_format": "CODE",
+        "execution_block_location": "none",
+        "context_forward_to": null
+      },
+      "input": {
+        "required": [],
+        "optional": [".github/agents/accelerators/component-requests.md"]
+      },
+      "output": {
+        "files": ["src/components/ui/", "src/components/layout/"],
+        "updates": []
+      },
+      "step_limit": {
+        "max_retries": 1,
+        "on_exceed": "BLOCK_AND_NOTIFY",
+        "reason": "Without a component library the frontend cannot be generated"
+      }
+    },
+
+    "frontend-analyzer": {
+      "instructions_file": ".github/instructions/frontend-analyzer.instructions.md",
+      "skills": [
+        ".github/skills/frontend/nextjs-patterns.skill.md"
+      ],
+      "phase": "FRONTEND_LISTO",
+      "step_in_phase": 1,
+      "out_of_scope": false,
+      "protocol": {
+        "output_format": "JSON",
+        "execution_block_location": "first_field",
+        "context_forward_to": "nextjs-generator",
+        "inherits_context_from": "traceability-documenter"
+      },
+      "input": {
+        "required": [
+          "migration-registry/forms/{form}-analysis.json",
+          "migration-registry/forms/{form}.md"
+        ],
+        "optional": [".github/agents/accelerators/services-catalog.json"]
+      },
+      "output": {
+        "files": ["migration-registry/forms/{form}-ui-brief.json"],
+        "updates": []
+      },
+      "step_limit": {
+        "max_retries": 2,
+        "on_exceed": "BLOCK_AND_NOTIFY",
+        "reason": "Brief de UI ambiguo requiere intervención del desarrollador"
+      }
+    },
+
+    "nextjs-generator": {
+      "instructions_file": ".github/instructions/nextjs-generator.instructions.md",
+      "skills": [
+        ".github/skills/frontend/nextjs-patterns.skill.md"
+      ],
+      "phase": "FRONTEND_LISTO",
+      "step_in_phase": 2,
+      "protocol": {
+        "output_format": "CODE",
+        "execution_block_location": "none",
+        "context_forward_to": null,
+        "inherits_context_from": "frontend-analyzer"
+      },
+      "input": {
+        "required": ["migration-registry/forms/{form}-ui-brief.json"],
+        "optional": ["src/components/domain/"]
+      },
+      "output": {
+        "files": ["src/app/(dashboard)/{domain}/{form}/"],
+        "updates": []
+      },
+      "step_limit": {
+        "max_retries": 2,
+        "on_exceed": "BLOCK_AND_NOTIFY",
+        "reason": "Missing library components must be registered in component-requests.md"
+      }
+    },
+
+    "security-reviewer": {
+      "instructions_file": ".github/instructions/security-reviewer.instructions.md",
+      "skills": [
+        ".github/skills/quality/security-checklist.skill.md",
+        ".github/skills/backend/spring-security.skill.md"
+      ],
+      "phase": "REVISADO",
+      "step_in_phase": 1,
+      "parallel_with": ["test-generator"],
+      "protocol": {
+        "output_format": "MD",
+        "execution_block_location": "html_comment_first_line",
+        "context_forward_to": "test-generator"
+      },
+      "input": {
+        "required": ["migration-registry/forms/{form}.md"],
+        "optional": ["src/main/java/.../"]
+      },
+      "output": {
+        "files": ["migration-registry/forms/{form}-security-report.md"],
+        "updates": []
+      },
+      "step_limit": {
+        "max_retries": 1,
+        "on_exceed": "SKIP_AND_WARN",
+        "reason": "Security findings are reported to the developer for manual review"
+      }
+    },
+
+    "test-generator": {
+      "instructions_file": ".github/instructions/test-generator.instructions.md",
+      "skills": [
+        ".github/skills/quality/test-patterns.skill.md"
+      ],
+      "phase": "REVISADO",
+      "step_in_phase": 2,
+      "parallel_with": ["security-reviewer"],
+      "protocol": {
+        "output_format": "CODE",
+        "execution_block_location": "none",
+        "context_forward_to": null,
+        "inherits_context_from": "security-reviewer"
+      },
+      "input": {
+        "required": ["migration-registry/forms/{form}-analysis.json"],
+        "optional": ["src/main/java/.../"]
+      },
+      "output": {
+        "files": ["src/test/java/.../"],
+        "updates": []
+      },
+      "step_limit": {
+        "max_retries": 2,
+        "on_exceed": "SKIP_AND_WARN",
+        "reason": "Los tests fallidos no bloquean el pipeline pero se reportan"
+      }
+    },
+
+    "docker-agent": {
+      "instructions_file": ".github/instructions/docker-agent.instructions.md",
+      "skills": [
+        ".github/skills/infra/docker-patterns.skill.md"
+      ],
+      "phase": "SETUP",
+      "step_in_phase": 1,
+      "one_time_only": true,
+      "protocol": {
+        "output_format": "CODE",
+        "execution_block_location": "none",
+        "context_forward_to": null
+      },
+      "input": {
+        "required": ["architecture-context.json"],
+        "optional": []
+      },
+      "output": {
+        "files": [
+          "Dockerfile",
+          "docker-compose.fcv.yml",
+          "docker-compose.dev.yml",
+          ".env.example"
+        ],
+        "updates": []
+      },
+      "step_limit": {
+        "max_retries": 1,
+        "on_exceed": "BLOCK_AND_NOTIFY",
+        "reason": "Configuración de infraestructura requiere revisión manual antes de desplegar"
+      }
+    }
+  }
+}

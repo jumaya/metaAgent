@@ -1,0 +1,109 @@
+{
+  "_metadata": {
+    "project": "Migración VB6 → Spring Boot — FCV Backend",
+    "version": "1.0",
+    "last_updated": "2026-03-12",
+    "total_services": 5
+  },
+  "_instructions": "Mantenido por @reuse-tracker y @traceability-documenter. Registra todos los servicios backend creados para evitar duplicados.",
+  "_status_values": ["PLANNED", "CREATED", "EXTENDED", "DEPRECATED"],
+  "services": {
+    "_template": {
+      "bounded_context": "",
+      "type": "QUERY | COMMAND",
+      "status": "PLANNED | CREATED | EXTENDED | DEPRECATED",
+      "class_name": "",
+      "package": "com.fcv.{modulo}.application.{queries|commands}",
+      "methods": [],
+      "entity": "",
+      "repository": "",
+      "created_from_form": "",
+      "used_by_forms": [],
+      "endpoints": [],
+      "created_date": "",
+      "last_modified": ""
+    },
+
+    "CrearTipoAtencionCommandHandler": {
+      "bounded_context": "admision",
+      "type": "COMMAND",
+      "status": "CREATED",
+      "class_name": "CrearTipoAtencionCommandHandler",
+      "package": "com.fcv.admision.application.commands",
+      "methods": ["handle(CrearTipoAtencionCommand) → Long"],
+      "entity": "TipoAtencion",
+      "repository": "TipoAtencionRepository",
+      "created_from_form": "frmAdmTipoAtencion",
+      "used_by_forms": ["frmAdmTipoAtencion"],
+      "endpoints": ["POST /api/v1/admision/tipos-atencion"],
+      "created_date": "2026-03-12",
+      "last_modified": "2026-03-12"
+    },
+
+    "ActualizarTipoAtencionCommandHandler": {
+      "bounded_context": "admision",
+      "type": "COMMAND",
+      "status": "CREATED",
+      "class_name": "ActualizarTipoAtencionCommandHandler",
+      "package": "com.fcv.admision.application.commands",
+      "methods": ["handle(ActualizarTipoAtencionCommand) → void"],
+      "entity": "TipoAtencion",
+      "repository": "TipoAtencionRepository",
+      "created_from_form": "frmAdmTipoAtencion",
+      "used_by_forms": ["frmAdmTipoAtencion"],
+      "endpoints": ["PUT /api/v1/admision/tipos-atencion/{id}"],
+      "created_date": "2026-03-12",
+      "last_modified": "2026-03-12"
+    },
+
+    "BuscarTipoAtencionPorIdQueryHandler": {
+      "bounded_context": "admision",
+      "type": "QUERY",
+      "status": "CREATED",
+      "class_name": "BuscarTipoAtencionPorIdQueryHandler",
+      "package": "com.fcv.admision.application.queries",
+      "methods": ["handle(BuscarTipoAtencionPorIdQuery) → TipoAtencionResponseDTO"],
+      "entity": "TipoAtencion",
+      "repository": "TipoAtencionRepository",
+      "created_from_form": "frmAdmTipoAtencion",
+      "used_by_forms": ["frmAdmTipoAtencion"],
+      "endpoints": ["GET /api/v1/admision/tipos-atencion/{id}"],
+      "created_date": "2026-03-12",
+      "last_modified": "2026-03-12"
+    },
+
+    "ListarTiposAtencionQueryHandler": {
+      "bounded_context": "admision",
+      "type": "QUERY",
+      "status": "CREATED",
+      "class_name": "ListarTiposAtencionQueryHandler",
+      "package": "com.fcv.admision.application.queries",
+      "methods": ["handle(ListarTiposAtencionQuery) → Page<TipoAtencionResumenDTO>"],
+      "entity": "TipoAtencion",
+      "repository": "TipoAtencionRepository",
+      "created_from_form": "frmAdmTipoAtencion",
+      "used_by_forms": ["frmAdmTipoAtencion"],
+      "endpoints": ["GET /api/v1/admision/tipos-atencion"],
+      "created_date": "2026-03-12",
+      "last_modified": "2026-03-12"
+    },
+
+    "ListarTiposAtencionBaseQueryHandler": {
+      "bounded_context": "admision",
+      "type": "QUERY",
+      "status": "CREATED",
+      "class_name": "ListarTiposAtencionBaseQueryHandler",
+      "package": "com.fcv.admision.application.queries",
+      "methods": ["handle(ListarTiposAtencionBaseQuery) → List<TipoAtencionBaseResumenDTO>"],
+      "entity": "TipoAtencionBase",
+      "repository": "TipoAtencionBaseRepository",
+      "created_from_form": "frmAdmTipoAtencion",
+      "used_by_forms": ["frmAdmTipoAtencion"],
+      "endpoints": ["GET /api/v1/admision/tipos-atencion/catalogo-base"],
+      "reuse_candidato": true,
+      "reuse_nota": "Probable reutilización desde frmAdmAtencion, frmAdmAtenTipoBaseVia y otros formularios de admisión",
+      "created_date": "2026-03-12",
+      "last_modified": "2026-03-12"
+    }
+  }
+}
